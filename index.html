@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 即時數據監控</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .bg-connected { background-color: #10b981; }
+        .bg-disconnected { background-color: #ef4444; }
+        .bg-processing { background-color: #f59e0b; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- 標題與狀態 -->
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-white">ESP32 數據儀表板</h1>
+                <p class="text-gray-400">透過 Web Serial 進行即時監控</p>
+            </div>
+            <div class="flex items-center space-x-2 bg-gray-800 p-3 rounded-lg border border-gray-700">
+                <span id="connectionStatus" class="status-dot bg-disconnected"></span>
+                <span id="statusText" class="text-sm font-medium">未連線</span>
+            </div>
+        </header>
+
+        <!-- 控制面板 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                <h2 class="text-lg font-semibold mb-4 flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    串列埠設定
+                </h2>
+                <div class="flex flex-col space-y-4">
+                    <div>
+                        <label class="block text-xs text-gray-500 uppercase tracking-wider mb-1">鮑率 (Baud Rate)</label>
+                        <select id="baudRate" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
+                            <option value="9600">9600</option>
+                            <option value="19200">19200</option>
+                            <option value="38400">38400</option>
+                            <option value="57600">57600</option>
+                            <option value="115200" selected>115200</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button id="connectBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded transition-colors duration-200 shadow-md">
+                            連接裝置
+                        </button>
+                        <button id="disconnectBtn" disabled class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded transition-colors duration-200 border border-gray-600">
+                            斷開裝置
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                <h2 class="text-lg font-semibold mb-4 flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    資料紀錄
+                </h2>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <button id="startRecordBtn" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded transition-all">
+                        開始記錄
+                    </button>
+                    <button id="stopRecordBtn" disabled class="bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded transition-all">
+                        停止記錄
+                    </button>
+                </div>
+                <button id="exportBtn" disabled class="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded transition-all flex items-center justify-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    匯出 CSV
+                </button>
+                <p id="recordCount" class="text-xs text-gray-400 mt-2 text-center">已記錄數據: 0 筆</p>
+            </div>
+        </div>
+
+        <!-- 圖表區域 -->
+        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">即時溫度趨勢圖</h2>
+                <div class="text-2xl font-mono text-blue-400" id="currentVal">-- °C</div>
+            </div>
+            <div class="relative h-64 md:h-96 w-full">
+                <canvas id="tempChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 偵錯訊息 -->
+        <div id="errorLog" class="hidden bg-red-900/30 border border-red-800 text-red-200 p-4 rounded-lg text-sm">
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const startRecordBtn = document.getElementById('startRecordBtn');
+        const stopRecordBtn = document.getElementById('stopRecordBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const baudRateSelect = document.getElementById('baudRate');
+        const statusText = document.getElementById('statusText');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const currentValText = document.getElementById('currentVal');
+        const recordCountText = document.getElementById('recordCount');
+        const errorLog = document.getElementById('errorLog');
+
+        // 全域變數
+        let port = null;
+        let reader = null;
+        let isConnected = false;
+        let isRecording = false;
+        let recordedData = []; 
+        let chart;
+        let keepReading = false;
+
+        // 初始化圖表
+        function initChart() {
+            const ctx = document.getElementById('tempChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '溫度 (°C)',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: '#374151' },
+                            ticks: { color: '#9ca3af', maxRotation: 0 }
+                        },
+                        y: {
+                            grid: { color: '#374151' },
+                            ticks: { color: '#9ca3af' },
+                            suggestedMin: 20,
+                            suggestedMax: 40
+                        }
+                    }
+                }
+            });
+        }
+
+        // 錯誤訊息顯示
+        function showError(msg) {
+            errorLog.textContent = msg;
+            errorLog.classList.remove('hidden');
+            setTimeout(() => errorLog.classList.add('hidden'), 5000);
+        }
+
+        // 更新連線 UI 狀態
+        function setConnectedUI(connected) {
+            isConnected = connected;
+            if (connected) {
+                statusText.innerText = "已連線";
+                connectionStatus.className = 'status-dot bg-connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                startRecordBtn.disabled = false;
+            } else {
+                statusText.innerText = "未連線";
+                connectionStatus.className = 'status-dot bg-disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                startRecordBtn.disabled = true;
+                stopRecordBtn.disabled = true;
+                currentValText.innerText = "-- °C";
+            }
+        }
+
+        // 連接序列埠
+        async function connectSerial() {
+            if (!("serial" in navigator)) {
+                showError("瀏覽器不支援 Web Serial API，請更換 Chrome 或 Edge。");
+                return;
+            }
+
+            try {
+                // 每次連線前確保變數為空
+                port = await navigator.serial.requestPort();
+                const baudRate = parseInt(baudRateSelect.value);
+                
+                await port.open({ baudRate: baudRate });
+                
+                keepReading = true;
+                setConnectedUI(true);
+
+                // 啟動讀取
+                readLoop();
+            } catch (err) {
+                console.error("連線錯誤:", err);
+                showError("無法連接序列埠: " + err.message);
+                setConnectedUI(false);
+            }
+        }
+
+        // 讀取迴圈
+        async function readLoop() {
+            let decoder = new TextDecoderStream();
+            let inputDone = port.readable.pipeTo(decoder.writable);
+            let inputStream = decoder.readable;
+            reader = inputStream.getReader();
+
+            let buffer = "";
+
+            try {
+                while (keepReading) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += value;
+                    if (buffer.includes('\n')) {
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+                        lines.forEach(line => {
+                            const trimmedLine = line.trim();
+                            if (trimmedLine) {
+                                const num = parseFloat(trimmedLine);
+                                if (!isNaN(num)) updateUI(num);
+                            }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error("讀取過程發生異常:", err);
+            } finally {
+                // 釋放資源的重要步驟
+                if (reader) {
+                    reader.releaseLock();
+                    reader = null;
+                }
+                // 等待管道關閉
+                await inputDone.catch(() => {});
+                console.log("讀取迴圈安全停止");
+            }
+        }
+
+        // 更新 UI 與數據
+        function updateUI(val) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour12: false, second: '2-digit', minute: '2-digit' });
+            
+            currentValText.innerText = `${val.toFixed(1)} °C`;
+
+            chart.data.labels.push(timeStr);
+            chart.data.datasets[0].data.push(val);
+
+            if (chart.data.labels.length > 60) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update('none');
+
+            if (isRecording) {
+                recordedData.push({
+                    timestamp: now.toISOString(),
+                    value: val
+                });
+                recordCountText.innerText = `已記錄數據: ${recordedData.length} 筆`;
+            }
+        }
+
+        // 斷開連線
+        async function disconnectSerial() {
+            try {
+                keepReading = false; 
+                
+                if (isRecording) {
+                    isRecording = false;
+                    startRecordBtn.disabled = false;
+                    stopRecordBtn.disabled = true;
+                    exportBtn.disabled = recordedData.length === 0;
+                }
+
+                // 1. 先取消 Reader
+                if (reader) {
+                    await reader.cancel();
+                    // 在 readLoop 的 finally 會處理 releaseLock
+                }
+
+                // 2. 等待一小段時間確保 readLoop 徹底結束並釋放鎖定
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // 3. 關閉 Port
+                if (port) {
+                    await port.close();
+                    port = null;
+                }
+
+                setConnectedUI(false);
+                console.log("裝置已完全釋放，可重新連線");
+            } catch (err) {
+                console.error("斷開過程出錯:", err);
+                showError("斷開連線失敗: " + err.message);
+                // 強制重置 UI 以免卡死
+                setConnectedUI(false);
+                port = null;
+                reader = null;
+            }
+        }
+
+        // 匯出 CSV
+        function exportToCSV() {
+            if (recordedData.length === 0) return;
+            let csvContent = "Timestamp,Value\n";
+            recordedData.forEach(row => {
+                csvContent += `${row.timestamp},${row.value}\n`;
+            });
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `esp32_data_${new Date().getTime()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 事件監聽
+        connectBtn.addEventListener('click', connectSerial);
+        disconnectBtn.addEventListener('click', disconnectSerial);
+
+        startRecordBtn.addEventListener('click', () => {
+            isRecording = true;
+            recordedData = [];
+            startRecordBtn.disabled = true;
+            stopRecordBtn.disabled = false;
+            exportBtn.disabled = true;
+            recordCountText.innerText = `正在記錄中...`;
+        });
+
+        stopRecordBtn.addEventListener('click', () => {
+            isRecording = false;
+            startRecordBtn.disabled = false;
+            stopRecordBtn.disabled = true;
+            exportBtn.disabled = recordedData.length === 0;
+            recordCountText.innerText = `紀錄已停止，共 ${recordedData.length} 筆`;
+        });
+
+        exportBtn.addEventListener('click', exportToCSV);
+
+        window.onload = initChart;
+    </script>
+</body>
+</html>
